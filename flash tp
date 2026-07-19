@@ -1,0 +1,683 @@
+-- =======================================================================
+-- amir hub and dz hub on top
+--=======================================================================
+if getgenv and getgenv().KanyeHub_IsLoaded then
+    return 
+end
+if getgenv then getgenv().KanyeHub_IsLoaded = true end
+
+-- =======================================================================
+-- Kanye flash tp
+-- =======================================================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
+local TeleportService = game:GetService("TeleportService")
+local Lighting = game:GetService("Lighting")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- =======================================================================
+-- DZ HUB ON TOP
+-- =======================================================================
+local config = {
+    enabled = true,
+    giantEnabled = false,
+    timingPercent = 90,
+    toolName = "Flash Teleport",
+    giantToolName = "Giant Potion",
+    binds = {
+        AlignCamera = "F",
+        Rejoin = "R",
+        SelfKick = "T"
+    }
+}
+
+local fileName = "KanyeHub_Settings.json"
+local activeKeybindToChange = nil
+local activeKeybindButton = nil
+
+local function loadSettings()
+    if isfile and isfile(fileName) then
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(readfile(fileName))
+        end)
+        if success and type(result) == "table" then
+            if result.enabled ~= nil then config.enabled = result.enabled end
+            if result.giantEnabled ~= nil then config.giantEnabled = result.giantEnabled end
+            if result.timingPercent then
+                 config.timingPercent = math.clamp(tonumber(result.timingPercent) or 90, 0, 100)
+            end
+            if result.binds and type(result.binds) == "table" then
+                config.binds.Rejoin = result.binds.Rejoin or "R"
+                config.binds.SelfKick = result.binds.SelfKick or "T"
+                config.binds.AlignCamera = result.binds.AlignCamera or "F"
+            end
+        end
+    end
+end
+
+local function saveSettings()
+    if writefile then
+        pcall(function()
+            writefile(fileName, HttpService:JSONEncode({
+                enabled = config.enabled,
+                giantEnabled = config.giantEnabled,
+                timingPercent = config.timingPercent,
+                binds = config.binds
+            }))
+        end)
+    end
+end
+
+-- =======================================================================
+-- AMIR HUB ON TOP
+-- =======================================================================
+local function triggerRejoin()
+    task.spawn(function() 
+        pcall(function()  
+            TeleportService:Teleport(game.PlaceId, player) 
+        end) 
+    end) 
+    pcall(function() 
+        player:Kick("rejoining") 
+    end) 
+end
+
+local function triggerSelfKick()
+    pcall(function()
+        player:Kick("\nkick by KanyeHub ;3\n")
+    end)
+end
+
+local function triggerAlignCamera()
+    local Workspace = game:GetService("Workspace")
+    local character = player.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then 
+        return 
+    end
+    
+    local rootPart = character.HumanoidRootPart
+    local playerPos = rootPart.Position
+    
+    local plotsFolder = Workspace:FindFirstChild("Plots")
+    if not plotsFolder then return end
+
+    local nearestPart = nil
+    local shortestDistance = math.huge
+
+    for _, plot in ipairs(plotsFolder:GetChildren()) do
+        local animalPodiums = plot:FindFirstChild("AnimalPodiums")
+        if animalPodiums then
+            for _, child in ipairs(animalPodiums:GetDescendants()) do
+                if child:IsA("BasePart") then
+                    local colorName = tostring(child.BrickColor):lower()
+                    if string.find(colorName, "green") or string.find(colorName, "lime") then
+                        local distance = (playerPos - child.Position).Magnitude
+                        if distance < shortestDistance then
+                            shortestDistance = distance
+                            nearestPart = child
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if nearestPart then
+        local _, podiumYaw, _ = nearestPart.CFrame:ToOrientation()
+        local targetPosition = nearestPart.Position + Vector3.new(0, 3, 0)
+        local characterYaw = podiumYaw + math.rad(180)
+        
+        pcall(function()
+            rootPart.CFrame = CFrame.new(targetPosition) * CFrame.Angles(0, characterYaw, 0)
+        end)
+        
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        local backpack = player:FindFirstChild("Backpack")
+        
+        if backpack and humanoid then
+            local carpetTool = backpack:FindFirstChild("carpettool") or backpack:FindFirstChild("Carpettool")
+            if not carpetTool then
+                for _, item in ipairs(backpack:GetChildren()) do
+                    if item:IsA("Tool") and string.find(string.lower(item.Name), "carpet") then
+                        carpetTool = item
+                        break
+                    end
+                end
+            end
+            if carpetTool then
+                pcall(function() humanoid:EquipTool(carpetTool) end)
+            end
+        end
+        
+        local camera = Workspace.CurrentCamera
+        if camera then
+            task.wait(0.1) 
+            local pitchX = 20
+            local rollZ = 0
+            local radX = math.rad(pitchX)
+            local radY = podiumYaw + math.rad(180)
+            local radZ = math.rad(rollZ)
+            
+            task.spawn(function()
+                for i = 1, 15 do
+                    pcall(function()
+                        camera.CameraType = Enum.CameraType.Custom
+                        local currentPosition = camera.CFrame.Position
+                        camera.CFrame = CFrame.new(currentPosition) * CFrame.fromOrientation(radX, radY, radZ)
+                    end)
+                    RunService.RenderStepped:Wait()
+                end
+            end)
+        end
+    end
+end
+
+-- =======================================================================
+-- KANYE FLASH TP
+-- =======================================================================
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if activeKeybindToChange then
+        if input.UserInputType == Enum.UserInputType.Keyboard then
+            local allowedKey = input.KeyCode
+            if allowedKey ~= Enum.KeyCode.Unknown and allowedKey ~= Enum.KeyCode.Escape then
+                config.binds[activeKeybindToChange] = allowedKey.Name
+                if activeKeybindButton then
+                     activeKeybindButton.Text = "[" .. allowedKey.Name .. "]"
+                end
+                saveSettings()
+            else
+                if activeKeybindButton then
+                    activeKeybindButton.Text = "[" .. config.binds[activeKeybindToChange] .. "]"
+                end
+            end
+            activeKeybindToChange = nil
+            activeKeybindButton = nil
+        end
+        return
+    end
+
+    if gameProcessed then return end
+    if UserInputService:GetFocusedTextBox() then return end
+
+    if input.UserInputType == Enum.UserInputType.Keyboard then
+        local success1, key1 = pcall(function() return Enum.KeyCode[config.binds.Rejoin] end)
+        local success2, key2 = pcall(function() return Enum.KeyCode[config.binds.SelfKick] end)
+        local success3, key3 = pcall(function() return Enum.KeyCode[config.binds.AlignCamera] end)
+
+        if success1 and input.KeyCode == key1 then
+            triggerRejoin()
+        elseif success2 and input.KeyCode == key2 then
+            triggerSelfKick()
+        elseif success3 and input.KeyCode == key3 then
+            triggerAlignCamera()
+        end
+    end
+end)
+
+-- =======================================================================
+-- kanye flash tp
+-- =======================================================================
+if CoreGui:FindFirstChild("KanyeHubUI_PerfectFinal") then CoreGui.KanyeHubUI_PerfectFinal:Destroy() end
+if playerGui and playerGui:FindFirstChild("KanyeHubUI_PerfectFinal") then playerGui.KanyeHubUI_PerfectFinal:Destroy() end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "KanyeHubUI_PerfectFinal"
+screenGui.ResetOnSpawn = false
+
+local successParent, _ = pcall(function()
+    local targetParent = (gethui and gethui()) or CoreGui
+    screenGui.Parent = targetParent
+end)
+if not successParent then screenGui.Parent = playerGui end
+
+local textColor = Color3.fromRGB(255, 255, 255)
+local buttonBgColor = Color3.fromRGB(45, 45, 45)
+local darkButtonBgColor = Color3.fromRGB(30, 30, 30)
+local strokeColor = Color3.fromRGB(255, 255, 255)
+local fontBold = Enum.Font.LuckiestGuy
+local globalMenuTransparency = 1
+
+local MenuFrame = Instance.new("Frame")
+MenuFrame.Name = "MenuFrame"
+MenuFrame.Size = UDim2.new(0, 165, 0, 160) 
+MenuFrame.Position = UDim2.new(0.75, 0, 0.25, 0)
+MenuFrame.BackgroundTransparency = globalMenuTransparency
+MenuFrame.BorderSizePixel = 0
+MenuFrame.ClipsDescendants = true
+MenuFrame.Parent = screenGui
+
+local MenuCorner = Instance.new("UICorner")
+MenuCorner.CornerRadius = UDim.new(0, 12)
+MenuCorner.Parent = MenuFrame
+
+local MenuStroke = Instance.new("UIStroke")
+MenuStroke.Color = strokeColor
+MenuStroke.Thickness = 2.5
+MenuStroke.Transparency = 0.5
+MenuStroke.Parent = MenuFrame
+
+local TopBar = Instance.new("Frame")
+TopBar.Name = "TopBar"
+TopBar.Size = UDim2.new(1, 0, 0, 30)
+TopBar.BackgroundTransparency = 1
+TopBar.BorderSizePixel = 0
+TopBar.Parent = MenuFrame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -35, 1, 0)
+Title.Position = UDim2.new(0, 8, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "KANYEHUB FLASH TP"
+Title.TextColor3 = textColor
+Title.Font = fontBold
+Title.TextSize = 11
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TopBar
+
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0, 18, 0, 18)
+ToggleBtn.Position = UDim2.new(1, -24, 0, 6)
+ToggleBtn.BackgroundColor3 = buttonBgColor
+ToggleBtn.Text = "▼"
+ToggleBtn.TextColor3 = textColor
+ToggleBtn.Font = fontBold
+ToggleBtn.TextSize = 10
+ToggleBtn.Parent = TopBar
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 5)
+
+local ContentFrame = Instance.new("Frame")
+ContentFrame.Size = UDim2.new(1, 0, 1, -30)
+ContentFrame.Position = UDim2.new(0, 0, 0, 30)
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.Parent = MenuFrame
+
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.Padding = UDim.new(0, 5)
+UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Parent = ContentFrame
+
+local UIPadding = Instance.new("UIPadding")
+UIPadding.PaddingTop = UDim.new(0, 4)
+UIPadding.Parent = ContentFrame
+
+local function createSolidButton(text, order)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.92, 0, 0, 24)
+    btn.BackgroundColor3 = buttonBgColor
+    btn.BackgroundTransparency = 0
+    btn.Text = text
+    btn.TextColor3 = textColor
+    btn.Font = fontBold
+    btn.TextSize = 11
+    btn.LayoutOrder = order
+    btn.Parent = ContentFrame
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    return btn
+end
+
+local FlashBtn = createSolidButton("FLASH TP: ON", 1)
+local GiantBtn = createSolidButton("GIANT POTION: OFF", 2)
+
+local AlignFrame = Instance.new("Frame")
+AlignFrame.Size = UDim2.new(0.92, 0, 0, 24)
+AlignFrame.BackgroundTransparency = 1
+AlignFrame.LayoutOrder = 3
+AlignFrame.Parent = ContentFrame
+
+local AlignBtn = Instance.new("TextButton")
+AlignBtn.Size = UDim2.new(0.7, -2, 1, 0)
+AlignBtn.BackgroundColor3 = buttonBgColor
+AlignBtn.Text = "ALIGN"
+AlignBtn.TextColor3 = textColor
+AlignBtn.Font = fontBold
+AlignBtn.TextSize = 11
+AlignBtn.Parent = AlignFrame
+Instance.new("UICorner", AlignBtn).CornerRadius = UDim.new(0, 8)
+
+local BindBtn = Instance.new("TextButton")
+BindBtn.Size = UDim2.new(0.3, 0, 1, 0)
+BindBtn.Position = UDim2.new(0.7, 2, 0, 0)
+BindBtn.BackgroundColor3 = darkButtonBgColor
+BindBtn.Text = "[F]"
+BindBtn.TextColor3 = textColor
+BindBtn.Font = fontBold
+BindBtn.TextSize = 11
+BindBtn.Parent = AlignFrame
+Instance.new("UICorner", BindBtn).CornerRadius = UDim.new(0, 8)
+
+local TimingFrame = Instance.new("Frame")
+TimingFrame.Size = UDim2.new(0.92, 0, 0, 24)
+TimingFrame.BackgroundTransparency = 1
+TimingFrame.LayoutOrder = 4
+TimingFrame.Parent = ContentFrame
+
+local TimingLabel = Instance.new("TextLabel")
+TimingLabel.Size = UDim2.new(0.5, 0, 1, 0)
+TimingLabel.BackgroundTransparency = 1
+TimingLabel.Text = "TIMING:"
+TimingLabel.TextColor3 = textColor
+TimingLabel.Font = fontBold
+TimingLabel.TextSize = 11
+TimingLabel.TextXAlignment = Enum.TextXAlignment.Left
+TimingLabel.Parent = TimingFrame
+
+local TimingBox = Instance.new("TextBox")
+TimingBox.Size = UDim2.new(0.45, 0, 1, 0)
+TimingBox.Position = UDim2.new(0.55, 0, 0, 0)
+TimingBox.BackgroundColor3 = buttonBgColor
+TimingBox.Text = "90%"
+TimingBox.TextColor3 = textColor
+TimingBox.Font = fontBold
+TimingBox.TextSize = 11
+TimingBox.Parent = TimingFrame
+Instance.new("UICorner", TimingBox).CornerRadius = UDim.new(0, 8)
+
+local DiscordLabelMenu = Instance.new("TextLabel")
+DiscordLabelMenu.Size = UDim2.new(1, 0, 0, 14)
+DiscordLabelMenu.BackgroundTransparency = 1
+DiscordLabelMenu.Text = "DISCORD.GG/KANYEHUB"
+DiscordLabelMenu.TextColor3 = Color3.fromRGB(220, 220, 220)
+DiscordLabelMenu.Font = fontBold
+DiscordLabelMenu.TextSize = 10
+DiscordLabelMenu.LayoutOrder = 5
+DiscordLabelMenu.Parent = ContentFrame
+
+-- =======================================================================
+-- kanye flash tp
+-- =======================================================================
+local BannerFrame = Instance.new("Frame")
+BannerFrame.Name = "BannerFrame"
+BannerFrame.Size = UDim2.new(0, 240, 0, 58) 
+BannerFrame.Position = UDim2.new(0.5, -120, 0.63, 0) 
+BannerFrame.BackgroundTransparency = 1
+BannerFrame.BorderSizePixel = 0
+BannerFrame.Parent = screenGui
+
+local BannerCorner = Instance.new("UICorner")
+BannerCorner.CornerRadius = UDim.new(0, 12)
+BannerCorner.Parent = BannerFrame
+
+local BannerStroke = Instance.new("UIStroke")
+BannerStroke.Color = strokeColor
+BannerStroke.Thickness = 2.5
+BannerStroke.Transparency = 0.5
+BannerStroke.Parent = BannerFrame
+
+local BannerTitle = Instance.new("TextLabel")
+BannerTitle.Size = UDim2.new(1, 0, 0, 20)
+BannerTitle.Position = UDim2.new(0, 0, 0, 4)
+BannerTitle.BackgroundTransparency = 1
+BannerTitle.Text = "FLASH TP"
+BannerTitle.TextColor3 = textColor
+BannerTitle.Font = fontBold
+BannerTitle.TextSize = 18
+BannerTitle.Parent = BannerFrame
+
+local StatsLabel = Instance.new("TextLabel")
+StatsLabel.Size = UDim2.new(1, 0, 0, 12)
+StatsLabel.Position = UDim2.new(0, 0, 0, 24)
+StatsLabel.BackgroundTransparency = 1
+StatsLabel.Text = "FPS: ... | PING: ...ms"
+StatsLabel.TextColor3 = textColor
+StatsLabel.Font = fontBold
+StatsLabel.TextSize = 12
+StatsLabel.Parent = BannerFrame
+
+local DiscordBannerLabel = Instance.new("TextLabel")
+DiscordBannerLabel.Size = UDim2.new(1, 0, 0, 12)
+DiscordBannerLabel.Position = UDim2.new(0, 0, 0, 38)
+DiscordBannerLabel.BackgroundTransparency = 1
+DiscordBannerLabel.Text = "DISCORD.GG/KANYEHUB"
+DiscordBannerLabel.TextColor3 = textColor
+DiscordBannerLabel.Font = fontBold
+DiscordBannerLabel.TextSize = 12
+DiscordBannerLabel.Parent = BannerFrame
+
+-- =======================================================================
+-- kanye flash tp
+-- =======================================================================
+local function updateUI()
+    FlashBtn.Text = "FLASH TP: " .. (config.enabled and "ON" or "OFF")
+    GiantBtn.Text = "GIANT POTION: " .. (config.giantEnabled and "ON" or "OFF")
+    BindBtn.Text = "[" .. tostring(config.binds.AlignCamera) .. "]"
+    TimingBox.Text = tostring(config.timingPercent) .. "%"
+end
+
+loadSettings()
+updateUI()
+
+FlashBtn.MouseButton1Click:Connect(function()
+    config.enabled = not config.enabled
+    FlashBtn.Text = "FLASH TP: " .. (config.enabled and "ON" or "OFF")
+    saveSettings()
+end)
+
+GiantBtn.MouseButton1Click:Connect(function()
+    config.giantEnabled = not config.giantEnabled
+    GiantBtn.Text = "GIANT POTION: " .. (config.giantEnabled and "ON" or "OFF")
+    saveSettings()
+end)
+
+AlignBtn.MouseButton1Click:Connect(function()
+    triggerAlignCamera()
+end)
+
+BindBtn.MouseButton1Click:Connect(function()
+    if activeKeybindToChange and activeKeybindButton then
+        activeKeybindButton.Text = "[" .. config.binds[activeKeybindToChange] .. "]"
+    end
+    activeKeybindToChange = "AlignCamera"
+    activeKeybindButton = BindBtn
+    BindBtn.Text = "[...]"
+end)
+
+TimingBox.FocusLost:Connect(function()
+    local match = TimingBox.Text:match("[%d%.]+")
+    local val = tonumber(match)
+    if val then config.timingPercent = math.clamp(val, 0, 100) end 
+    TimingBox.Text = tostring(config.timingPercent) .. "%"
+    saveSettings() 
+end)
+
+-- =======================================================================
+-- ez
+-- =======================================================================
+local lastTick = tick()
+local frames = 0
+
+RunService.RenderStepped:Connect(function()
+    frames = frames + 1
+    local currentTick = tick()
+    
+    if currentTick - lastTick >= 1 then
+        local fps = frames
+        local ping = 0
+    
+        pcall(function()
+            ping = math.round(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+        end)
+        
+        StatsLabel.Text = string.format("FPS: %d | PING: %dms", fps, ping)
+        frames = 0
+        lastTick = currentTick
+    end
+end)
+
+-- =======================================================================
+-- ez
+-- =======================================================================
+local dragging, dragInput, dragStart, startPos
+
+local function update(input)
+    local delta = input.Position - dragStart
+    MenuFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+TopBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = MenuFrame.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+MenuFrame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+-- =======================================================================
+-- ez
+-- =======================================================================
+local isMinimized = false
+local fastTweenInfo = TweenInfo.new(0.15, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out)
+
+ToggleBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    if isMinimized then
+        ToggleBtn.Text = "▲"
+        TweenService:Create(MenuFrame, fastTweenInfo, {Size = UDim2.new(0, 165, 0, 30)}):Play()
+    else
+        ToggleBtn.Text = "▼"
+        TweenService:Create(MenuFrame, fastTweenInfo, {Size = UDim2.new(0, 165, 0, 160)}):Play()
+    end
+end)
+
+-- =======================================================================
+-- ez
+-- =======================================================================
+local activeTriggers = {}
+
+ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt, who)
+    if who ~= player or (not config.enabled and not config.giantEnabled) then return end
+    if prompt.ActionText ~= "Steal" and prompt.Name ~= "Steal" then return end
+    if activeTriggers[prompt] then return end
+    
+    activeTriggers[prompt] = true
+    local startClock = os.clock()
+    local ping = 0
+    
+    pcall(function()
+        local rawPing = player:GetNetworkPing()
+        if rawPing and rawPing > 0 then ping = rawPing end
+    end)
+    
+    local pingCompensation = math.clamp(ping * 0.85, 0, 0.25)
+    local targetProgressTime = prompt.HoldDuration * (config.timingPercent / 100)
+    local exactFireTime = startClock + targetProgressTime - pingCompensation
+
+    local fired = false
+    local conn
+    
+    conn = RunService.Heartbeat:Connect(function()
+        if not prompt or not prompt.Parent then
+            conn:Disconnect()
+            activeTriggers[prompt] = nil
+            return
+        end
+        
+        if os.clock() >= exactFireTime and not fired then
+            fired = true
+            conn:Disconnect()
+            activeTriggers[prompt] = nil
+            
+            local char = player.Character
+            local backpack = player:FindFirstChild("Backpack")
+            if not char or not backpack then return end
+            
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if not hum or hum.Health <= 0 then return end
+
+            task.spawn(function()
+                local flashTool = config.enabled and (char:FindFirstChild(config.toolName) or backpack:FindFirstChild(config.toolName))
+                local giantTool = config.giantEnabled and (char:FindFirstChild(config.giantToolName) or backpack:FindFirstChild(config.giantToolName))
+
+                hum:UnequipTools()
+                task.wait(0.01)
+                
+                if flashTool then
+                    flashTool.Parent = char
+                    hum:EquipTool(flashTool)
+                    task.wait(0.01)
+                    for i = 1, 3 do 
+                        pcall(function() flashTool:Activate() end) 
+                        RunService.Heartbeat:Wait() 
+                    end
+                end
+                
+                if giantTool then
+                    giantTool.Parent = char
+                    hum:EquipTool(giantTool)
+                    task.wait(0.01)
+                    for i = 1, 3 do 
+                        pcall(function() giantTool:Activate() end) 
+                        RunService.Heartbeat:Wait() 
+                    end
+                end
+
+                task.wait(0.05)
+                if flashTool then pcall(function() flashTool.Parent = backpack end) end
+                if giantTool then pcall(function() giantTool.Parent = backpack end) end
+            end)
+        end
+    end)
+
+    prompt.PromptButtonHoldEnded:Connect(function()
+        if not fired then
+            if conn then conn:Disconnect() end
+            activeTriggers[prompt] = nil
+        end
+    end)
+end)
+
+-- =======================================================================
+-- amir and dz hub on top
+-- =======================================================================
+Lighting.LightingChanged:Connect(function()
+    Lighting.GlobalShadows = false 
+    Lighting.FogEnd = 9e9
+    Lighting.Brightness = 2 
+end)
+
+pcall(function()
+    Lighting.GlobalShadows = false 
+    Lighting.FogEnd = 9e9
+    Lighting.Brightness = 2 
+end)
+
+for _, part in ipairs(workspace:GetDescendants()) do
+    if part:IsA("BasePart") then
+         part.Material = Enum.Material.SmoothPlastic 
+        part.Reflectance = 0 
+    end
+end
+
+if player.Character then
+    for _, part in ipairs(player.Character:GetDescendants()) do
+        if part:IsA("BasePart") then
+             part.Material = Enum.Material.SmoothPlastic
+        end
+    end
+end
