@@ -1,1109 +1,569 @@
--- New Era of Total Deobfuscation - Ex: This Source Was Rebuilt by pec7nha
--- Nova Hub GUI
-
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
-local Stats = game:GetService("Stats")
+local Players                = game:GetService("Players")
+local TweenService           = game:GetService("TweenService")
+local UserInputService       = game:GetService("UserInputService")
+local RunService             = game:GetService("RunService")
 local ProximityPromptService = game:GetService("ProximityPromptService")
-local HttpService = game:GetService("HttpService")
-local TeleportService = game:GetService("TeleportService")
-local Workspace = game:GetService("Workspace")
-local Camera = workspace.CurrentCamera
 
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local player    = Players.LocalPlayer
+local PlayerGui = player:WaitForChild("PlayerGui")
+local Camera    = workspace.CurrentCamera
 
--- Cores (mantidas do original)
-local COLOR_BG_MAIN      = Color3.new(0.0392157, 0.137255, 0.333333)
-local COLOR_BG_DARK      = Color3.new(0.0784314, 0.0980392, 0.156863)
-local COLOR_BG_DARKER    = Color3.new(0.0196078, 0.0588235, 0.137255)
-local COLOR_BLUE         = Color3.new(0, 0.352941, 0.705882)
-local COLOR_TEXT         = Color3.new(0.784314, 0.823529, 1)
-local COLOR_TEXT_DIM     = Color3.new(0.705882, 0.784314, 1)
-local COLOR_WHITE        = Color3.new(1, 1, 1)
-local COLOR_TOGGLE_KNOB  = Color3.new(0.784314, 0.823529, 0.901961)
-local COLOR_SLIDER_BG    = Color3.new(0.0980392, 0.117647, 0.196078)
-local COLOR_BTN_KEYBIND  = Color3.new(0.137255, 0.156863, 0.215686)
-local COLOR_WATERMARK_BG = Color3.new(0.0784314, 0.0980392, 0.176471)
-local COLOR_BAR_BG_INNER = Color3.new(0.0588235, 0.0705882, 0.137255)
+local GREEN      = Color3.fromRGB(50, 175, 70)
+local GREY       = Color3.fromRGB(55, 55, 55)
+local TWEEN_INFO = TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
--- Einstellungen (States)
-local toggleStates = {
-    AutoPotion = false,
-    SpeedBoost = false,
-    LaggerOnSteal = false,
-    FOV = false,
-    Transparency = false,
-}
+local function tw(obj, props, dur)
+	TweenService:Create(obj, TweenInfo.new(dur or 0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), props):Play()
+end
 
-local sliderValues = {
-    FlashStart = 79.0,
-    LaggerPower = 44,
-    SpeedConfig = 27,
-    FovConfig = 70,
-    TransparencyAmount = 0.75,
-}
+local function FindTool(key)
+	local bp = player:FindFirstChild("Backpack")
+	local ch = player.Character
+	if ch then
+		for _, t in pairs(ch:GetChildren()) do
+			if t:IsA("Tool") and t.Name:lower():find(key:lower()) then return t end
+		end
+	end
+	if bp then
+		for _, t in pairs(bp:GetChildren()) do
+			if t:IsA("Tool") and t.Name:lower():find(key:lower()) then return t end
+		end
+	end
+	return nil
+end
 
-local keybinds = {
-    AlignUp = Enum.KeyCode.V,
-    AlignDown = Enum.KeyCode.B,
-}
-
--- Variáveis de funcionalidade
-local boostConn = nil
-local fovConn = nil
-local decorationWatcher = nil
-local decorationEnabled = false
-local decorationOriginal = {}
-local isResetting = false
+local flashEnabled   = false
+local giantEnabled   = false
+local sliderValue    = 0.91
+local manualOverride = false
+local triggerBump    = false
 local activeTriggers = {}
-local savePath = "NovaHub_Settings.json"
+local ppsConn        = nil
+local hbConn         = nil
+local barFill        = nil
 
--- ======================== FUNÇÕES DE CARREGAMENTO/SALVAMENTO ========================
-local function loadSettings()
-    pcall(function()
-        if isfile and isfile(savePath) then
-            local content = readfile(savePath)
-            local decoded = HttpService:JSONDecode(content)
-            if decoded.flashStart then sliderValues.FlashStart = math.clamp(decoded.flashStart, 0, 100) end
-            if decoded.laggerPower then sliderValues.LaggerPower = math.clamp(decoded.laggerPower, 0, 100) end
-            if decoded.speedConfig then sliderValues.SpeedConfig = math.clamp(decoded.speedConfig, 16, 60) end
-            if decoded.fovConfig then sliderValues.FovConfig = math.clamp(decoded.fovConfig, 30, 120) end
-            if decoded.transparencyAmount then sliderValues.TransparencyAmount = math.clamp(decoded.transparencyAmount, 0, 1) end
-            if decoded.transparency ~= nil then toggleStates.Transparency = decoded.transparency end
-            if decoded.autoPotion ~= nil then toggleStates.AutoPotion = decoded.autoPotion end
-            if decoded.speedBoost ~= nil then toggleStates.SpeedBoost = decoded.speedBoost end
-            if decoded.laggerOnSteal ~= nil then toggleStates.LaggerOnSteal = decoded.laggerOnSteal end
-            if decoded.fov ~= nil then toggleStates.FOV = decoded.fov end
-            if decoded.alignUp then keybinds.AlignUp = Enum.KeyCode[decoded.alignUp] or Enum.KeyCode.V end
-            if decoded.alignDown then keybinds.AlignDown = Enum.KeyCode[decoded.alignDown] or Enum.KeyCode.B end
-        end
-    end)
-    if toggleStates.Transparency then
-        enableDecorationTransparency()
-    end
+local zeroGravEnabled = false
+local zeroGravForce   = nil
+local zeroGravConn    = nil
+
+local function getPingBase()
+	local ping = 80
+	pcall(function() ping = player:GetNetworkPing() * 1000 end)
+	if ping <= 30 then return 0.91
+	elseif ping <= 70 then return 0.92
+	elseif ping <= 120 then return 0.93
+	else return 0.94 end
 end
 
-local function saveSettings()
-    pcall(function()
-        if writefile then
-            local data = {
-                flashStart = sliderValues.FlashStart,
-                laggerPower = sliderValues.LaggerPower,
-                speedConfig = sliderValues.SpeedConfig,
-                fovConfig = sliderValues.FovConfig,
-                transparencyAmount = sliderValues.TransparencyAmount,
-                transparency = toggleStates.Transparency,
-                autoPotion = toggleStates.AutoPotion,
-                speedBoost = toggleStates.SpeedBoost,
-                laggerOnSteal = toggleStates.LaggerOnSteal,
-                fov = toggleStates.FOV,
-                alignUp = keybinds.AlignUp.Name,
-                alignDown = keybinds.AlignDown.Name,
-            }
-            writefile(savePath, HttpService:JSONEncode(data))
-        end
-    end)
+local function doGiantPotion()
+	local hum = player.Character and player.Character:FindFirstChild("Humanoid")
+	if not hum then return end
+	local potion = FindTool("giant")
+	if not potion then return end
+	hum:EquipTool(potion)
+	task.wait()
+	potion:Activate()
+	task.wait()
 end
 
--- ======================== FUNÇÕES DE DECORAÇÃO (TRANSPARENCY) ========================
-local function getDecorationParts()
-    local parts = {}
-    local plots = Workspace:FindFirstChild("Plots")
-    if not plots then return parts end
-    for _, plot in ipairs(plots:GetChildren()) do
-        local decorations = plot:FindFirstChild("Decorations")
-        if decorations then
-            for _, part in ipairs(decorations:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    table.insert(parts, part)
-                end
-            end
-        end
-    end
-    return parts
+local function flashStart()
+	if ppsConn then ppsConn:Disconnect() end
+	ppsConn = ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
+		if not flashEnabled then return end
+		if activeTriggers[prompt] then return end
+		activeTriggers[prompt] = true
+		local start = os.clock()
+		local fired = false
+		local conn
+		conn = RunService.PreRender:Connect(function()
+			if not prompt or not prompt.Parent then
+				conn:Disconnect(); activeTriggers[prompt] = nil
+				if barFill then tw(barFill, {Size = UDim2.new(0, 0, 1, 0)}, 0.3) end
+				return
+			end
+			local progress = math.clamp((os.clock() - start) / prompt.HoldDuration, 0, 1)
+			if barFill then barFill.Size = UDim2.new(progress, 0, 1, 0) end
+			if not fired and progress >= sliderValue then
+				fired = true; conn:Disconnect(); activeTriggers[prompt] = nil
+				triggerBump = not triggerBump
+				local ch  = player.Character
+				local hum = ch and ch:FindFirstChild("Humanoid")
+				if giantEnabled and hum then
+					local currentTool = ch:FindFirstChildOfClass("Tool")
+					local currentToolName = currentTool and currentTool.Name or nil
+					doGiantPotion()
+					if currentToolName then
+						local reTool = FindTool(currentToolName)
+						if reTool and hum then
+							hum:EquipTool(reTool)
+							task.wait()
+						end
+					end
+				end
+				local tool = ch and ch:FindFirstChildOfClass("Tool")
+				if tool then tool:Activate() end
+				if barFill then
+					barFill.Size = UDim2.new(1, 0, 1, 0)
+					task.delay(0.2, function()
+						tw(barFill, {Size = UDim2.new(0, 0, 1, 0)}, 0.4)
+					end)
+				end
+			end
+		end)
+		prompt.PromptButtonHoldEnded:Connect(function()
+			if not fired then
+				conn:Disconnect(); activeTriggers[prompt] = nil
+				if barFill then tw(barFill, {Size = UDim2.new(0, 0, 1, 0)}, 0.3) end
+			end
+		end)
+	end)
+
+	if hbConn then hbConn:Disconnect() end
+	hbConn = RunService.Heartbeat:Connect(function()
+		if not manualOverride then
+			local base = getPingBase()
+			sliderValue = triggerBump and base + 0.01 or base
+		end
+	end)
 end
 
-local function enableDecorationTransparency()
-    local parts = getDecorationParts()
-    for _, part in ipairs(parts) do
-        if not decorationOriginal[part] then
-            decorationOriginal[part] = part.Transparency
-        end
-        part.Transparency = sliderValues.TransparencyAmount
-    end
-    decorationEnabled = true
+local function flashStop()
+	if ppsConn then ppsConn:Disconnect(); ppsConn = nil end
+	if hbConn  then hbConn:Disconnect();  hbConn  = nil end
+	activeTriggers = {}
+	if barFill then tw(barFill, {Size = UDim2.new(0, 0, 1, 0)}, 0.3) end
 end
 
-local function disableDecorationTransparency()
-    for part, orig in pairs(decorationOriginal) do
-        if part and part.Parent then
-            part.Transparency = orig
-        end
-    end
-    decorationOriginal = {}
-    decorationEnabled = false
+local function enableZeroGrav()
+	zeroGravEnabled = true
+	local ch  = player.Character
+	local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	if zeroGravForce then zeroGravForce:Destroy(); zeroGravForce = nil end
+
+	local bf = Instance.new("BodyForce")
+	bf.Name = "ZeroGravSlowFall"
+	bf.Parent = hrp
+	zeroGravForce = bf
+
+	if zeroGravConn then zeroGravConn:Disconnect() end
+	zeroGravConn = RunService.Heartbeat:Connect(function()
+		if not zeroGravEnabled then return end
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		if not root or not zeroGravForce or not zeroGravForce.Parent then return end
+		local mass = 0
+		for _, part in pairs(player.Character:GetDescendants()) do
+			if part:IsA("BasePart") then mass = mass + part:GetMass() end
+		end
+		local counterForce = mass * workspace.Gravity * 0.92
+		zeroGravForce.Force = Vector3.new(0, counterForce, 0)
+	end)
 end
 
-local function startDecorationWatcher()
-    if decorationWatcher then decorationWatcher:Disconnect() end
-    decorationWatcher = Workspace.DescendantAdded:Connect(function(obj)
-        if not decorationEnabled then return end
-        if obj:IsA("BasePart") then
-            local plots = Workspace:FindFirstChild("Plots")
-            if plots and obj:IsDescendantOf(plots) then
-                local decorations = obj:FindFirstAncestor("Decorations")
-                if decorations then
-                    if not decorationOriginal[obj] then
-                        decorationOriginal[obj] = obj.Transparency
-                    end
-                    task.wait(0.05)
-                    if obj and obj.Parent then
-                        obj.Transparency = sliderValues.TransparencyAmount
-                    end
-                end
-            end
-        end
-    end)
+local function disableZeroGrav()
+	zeroGravEnabled = false
+	if zeroGravConn then zeroGravConn:Disconnect(); zeroGravConn = nil end
+	if zeroGravForce then zeroGravForce:Destroy(); zeroGravForce = nil end
 end
 
-local function setDecorationEnabled(state)
-    if state then
-        enableDecorationTransparency()
-        startDecorationWatcher()
-    else
-        if decorationWatcher then decorationWatcher:Disconnect() end
-        decorationWatcher = nil
-        disableDecorationTransparency()
-    end
+local function alignCamera()
+	local ch   = player.Character
+	local head = ch and ch:FindFirstChild("Head")
+	if not head then return end
+	local cam = workspace.CurrentCamera
+	local pos = head.Position
+	local lookDir = cam.CFrame.LookVector
+	local flatDir = Vector3.new(lookDir.X, 0, lookDir.Z).Unit
+	local pitchRad = math.rad(-37)
+	local pitched  = CFrame.new(pos, pos + flatDir) * CFrame.Angles(pitchRad, 0, 0)
+	cam.CFrame = pitched
 end
 
--- ======================== FUNÇÕES DE JOGO ========================
-local function getCharacter()
-    return LocalPlayer.Character
+local LemonHub_FlashTP = Instance.new("ScreenGui")
+LemonHub_FlashTP.Name = "LemonHub_FlashTP"
+LemonHub_FlashTP.ResetOnSpawn = false
+LemonHub_FlashTP.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+LemonHub_FlashTP.IgnoreGuiInset = false
+LemonHub_FlashTP.Parent = PlayerGui
+
+local Main = Instance.new("Frame")
+Main.Name = "Main"
+Main.Size = UDim2.new(0, 230, 0, 300)
+Main.Position = UDim2.new(0.5, 180, 0.35, 26)
+Main.BackgroundColor3 = Color3.fromRGB(18, 18, 18)
+Main.BorderSizePixel = 0
+Main.ClipsDescendants = true
+Main.Active = false
+Main.Selectable = false
+Main.Parent = LemonHub_FlashTP
+
+Instance.new("UICorner", Main)
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(50, 50, 50)
+MainStroke.Parent = Main
+
+local Header = Instance.new("Frame")
+Header.Name = "Header"
+Header.Size = UDim2.new(1, 0, 0, 36)
+Header.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+Header.BorderSizePixel = 0
+Header.ZIndex = 10
+Header.Active = true
+Header.Parent = Main
+
+Instance.new("UICorner", Header)
+
+local IconFrame = Instance.new("Frame")
+IconFrame.Name = "IconBadge"
+IconFrame.Size = UDim2.new(0, 22, 0, 22)
+IconFrame.Position = UDim2.new(0, 8, 0.5, -11)
+IconFrame.BackgroundColor3 = Color3.fromRGB(255, 210, 0)
+IconFrame.BorderSizePixel = 0
+IconFrame.ZIndex = 11
+IconFrame.Parent = Header
+
+local IconCorner = Instance.new("UICorner")
+IconCorner.CornerRadius = UDim.new(0, 5)
+IconCorner.Parent = IconFrame
+
+local IconText = Instance.new("TextLabel")
+IconText.Size = UDim2.new(1, 0, 1, 0)
+IconText.BackgroundTransparency = 1
+IconText.ZIndex = 12
+IconText.Text = "</>"
+IconText.TextColor3 = Color3.fromRGB(30, 50, 30)
+IconText.Font = Enum.Font.GothamBlack
+IconText.FontFace = Font.new(
+	"rbxasset://fonts/families/GothamSSm.json",
+	Enum.FontWeight.Heavy,
+	Enum.FontStyle.Normal
+)
+IconText.TextScaled = false
+IconText.Parent = IconFrame
+
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, -70, 1, 0)
+Title.Position = UDim2.new(0, 36, 0, 0)
+Title.BackgroundTransparency = 1
+Title.ZIndex = 11
+Title.Text = "discord.gg/lemonhub"
+Title.TextColor3 = Color3.fromRGB(240, 240, 240)
+Title.TextSize = 12
+Title.Font = Enum.Font.GothamBold
+Title.FontFace = Font.new(
+	"rbxasset://fonts/families/GothamSSm.json",
+	Enum.FontWeight.Bold,
+	Enum.FontStyle.Normal
+)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = Header
+
+local MinBtn = Instance.new("TextButton")
+MinBtn.Name = "MinimizeBtn"
+MinBtn.Size = UDim2.new(0, 22, 0, 22)
+MinBtn.Position = UDim2.new(1, -28, 0.5, -11)
+MinBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+MinBtn.BorderSizePixel = 0
+MinBtn.ZIndex = 11
+MinBtn.Text = "-"
+MinBtn.TextColor3 = Color3.fromRGB(160, 160, 160)
+MinBtn.TextSize = 16
+MinBtn.Font = Enum.Font.GothamBold
+MinBtn.FontFace = Font.new(
+	"rbxasset://fonts/families/GothamSSm.json",
+	Enum.FontWeight.Bold,
+	Enum.FontStyle.Normal
+)
+MinBtn.AutoButtonColor = false
+MinBtn.Parent = Header
+
+local MinCorner = Instance.new("UICorner")
+MinCorner.CornerRadius = UDim.new(0, 4)
+MinCorner.Parent = MinBtn
+
+local Content = Instance.new("Frame")
+Content.Name = "Content"
+Content.Size = UDim2.new(1, -16, 1, -46)
+Content.Position = UDim2.new(0, 8, 0, 42)
+Content.BackgroundTransparency = 1
+Content.Parent = Main
+
+local function makeToggleButton(parent, yOffset, labelBase, startOn, onToggle)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, 0, 0, 34)
+	btn.Position = UDim2.new(0, 0, 0, yOffset)
+	btn.BackgroundColor3 = startOn and GREEN or GREY
+	btn.BorderSizePixel = 0
+	btn.Text = ""
+	btn.AutoButtonColor = false
+	btn.Parent = parent
+
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 6)
+	c.Parent = btn
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = labelBase .. (startOn and ": ON" or ": OFF")
+	lbl.TextColor3 = Color3.fromRGB(240, 240, 240)
+	lbl.TextSize = 11
+	lbl.Font = Enum.Font.GothamBold
+	lbl.FontFace = Font.new(
+		"rbxasset://fonts/families/GothamSSm.json",
+		Enum.FontWeight.Bold,
+		Enum.FontStyle.Normal
+	)
+	lbl.Parent = btn
+
+	local on = startOn
+	btn.MouseButton1Click:Connect(function()
+		on = not on
+		lbl.Text = labelBase .. (on and ": ON" or ": OFF")
+		TweenService:Create(btn, TWEEN_INFO, {
+			BackgroundColor3 = on and GREEN or GREY
+		}):Play()
+		if onToggle then onToggle(on) end
+	end)
+
+	return btn, lbl
 end
 
-local function getHumanoid()
-    local char = getCharacter()
-    return char and char:FindFirstChildOfClass("Humanoid")
+local function makeActionButton(parent, yOffset, labelText, onClick)
+	local btn = Instance.new("TextButton")
+	btn.Size = UDim2.new(1, 0, 0, 34)
+	btn.Position = UDim2.new(0, 0, 0, yOffset)
+	btn.BackgroundColor3 = GREY
+	btn.BorderSizePixel = 0
+	btn.Text = ""
+	btn.AutoButtonColor = false
+	btn.Parent = parent
+
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, 6)
+	c.Parent = btn
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = labelText
+	lbl.TextColor3 = Color3.fromRGB(240, 240, 240)
+	lbl.TextSize = 11
+	lbl.Font = Enum.Font.GothamBold
+	lbl.FontFace = Font.new(
+		"rbxasset://fonts/families/GothamSSm.json",
+		Enum.FontWeight.Bold,
+		Enum.FontStyle.Normal
+	)
+	lbl.Parent = btn
+
+	btn.MouseButton1Click:Connect(function()
+		TweenService:Create(btn, TWEEN_INFO, { BackgroundColor3 = GREEN }):Play()
+		task.delay(0.35, function()
+			TweenService:Create(btn, TWEEN_INFO, { BackgroundColor3 = GREY }):Play()
+		end)
+		if onClick then onClick() end
+	end)
+
+	return btn, lbl
 end
 
-local function triggerLagger()
-    if not toggleStates.LaggerOnSteal then return end
-    task.spawn(function()
-        local lagStrength = math.clamp(sliderValues.LaggerPower / 40, 0.3, 3.0)
-        settings().Network.IncomingReplicationLag = lagStrength
-        task.wait(2)
-        settings().Network.IncomingReplicationLag = 0
-    end)
-end
-
-local function enableSpeedBoost()
-    if boostConn then boostConn:Disconnect() end
-    boostConn = RunService.Heartbeat:Connect(function()
-        local char = LocalPlayer.Character
-        if not char then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if not hrp or not hum then return end
-        local moveDir = hum.MoveDirection
-        if moveDir.Magnitude > 0 then
-            local flatDir = Vector3.new(moveDir.X, 0, moveDir.Z).Unit
-            hrp.Velocity = Vector3.new(flatDir.X * sliderValues.SpeedConfig, hrp.Velocity.Y, flatDir.Z * sliderValues.SpeedConfig)
-        end
-    end)
-end
-
-local function disableSpeedBoost()
-    if boostConn then boostConn:Disconnect() boostConn = nil end
-end
-
-local function enableFovChanger()
-    if fovConn then fovConn:Disconnect() end
-    fovConn = RunService.RenderStepped:Connect(function()
-        if toggleStates.FOV then
-            Camera.FieldOfView = sliderValues.FovConfig
-        end
-    end)
-end
-
-local function disableFovChanger()
-    if fovConn then fovConn:Disconnect() fovConn = nil end
-    Camera.FieldOfView = 70
-end
-
-local function EquipCarpet()
-    local char = LocalPlayer.Character
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    local carpet = backpack and backpack:FindFirstChild("Flying Carpet") or (char and char:FindFirstChild("Flying Carpet"))
-    if carpet and char then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then hum:EquipTool(carpet) task.wait(0.02) end
-    end
-end
-
-local function EquipFlash()
-    local flashTool = LocalPlayer.Backpack:FindFirstChild("Flash Teleport") or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Flash Teleport"))
-    if flashTool then
-        local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum then hum:EquipTool(flashTool) end
-    end
-end
-
-local function ExecuteAlign()
-    EquipCarpet()
-    local char = LocalPlayer.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    local plots = workspace:FindFirstChild("Plots")
-    if root and plots then
-        local target = nil
-        local dist = math.huge
-        for _, plot in ipairs(plots:GetChildren()) do
-            if plot.Name == LocalPlayer.Name then continue end
-            local podiums = plot:FindFirstChild("AnimalPodiums")
-            if podiums then
-                for _, pod in ipairs(podiums:GetChildren()) do
-                    local base = pod:FindFirstChild("Base")
-                    local spawn = base and base:FindFirstChild("Spawn")
-                    if spawn then
-                        local yDiff = math.abs(spawn.Position.Y - root.Position.Y)
-                        if yDiff < 5 then
-                            local d = (spawn.Position - root.Position).Magnitude
-                            if d < dist then dist = d target = spawn end
-                        end
-                    end
-                end
-            end
-        end
-        if target then
-            root.CFrame = target.CFrame + Vector3.new(0, 3, 0)
-            task.wait(0.05)
-            local _, currentYaw, _ = Camera.CFrame:ToOrientation()
-            Camera.CameraType = Enum.CameraType.Scriptable
-            Camera.CFrame = CFrame.new(Camera.CFrame.Position) * CFrame.fromOrientation(0.75, currentYaw, 0)
-            task.wait(0.05)
-            Camera.CameraType = Enum.CameraType.Custom
-            root.CFrame = root.CFrame * CFrame.Angles(0, math.pi, 0)
-            task.wait(0.12)
-            EquipFlash()
-        end
-    end
-end
-
-local function ExecuteAlignDown()
-    EquipCarpet()
-    local char = LocalPlayer.Character
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-    local plots = workspace:FindFirstChild("Plots")
-    if root and plots then
-        local target = nil
-        local dist = math.huge
-        for _, plot in ipairs(plots:GetChildren()) do
-            if plot.Name == LocalPlayer.Name then continue end
-            local podiums = plot:FindFirstChild("AnimalPodiums")
-            if podiums then
-                for _, pod in ipairs(podiums:GetChildren()) do
-                    local base = pod:FindFirstChild("Base")
-                    local spawn = base and base:FindFirstChild("Spawn")
-                    if spawn then
-                        local yDiff = math.abs(spawn.Position.Y - root.Position.Y)
-                        if yDiff < 5 then
-                            local d = (spawn.Position - root.Position).Magnitude
-                            if d < dist then dist = d target = spawn end
-                        end
-                    end
-                end
-            end
-        end
-        if target then
-            root.CFrame = target.CFrame + Vector3.new(0, 3, 0)
-            task.wait(0.05)
-            local _, currentYaw, _ = Camera.CFrame:ToOrientation()
-            Camera.CameraType = Enum.CameraType.Scriptable
-            Camera.CFrame = CFrame.new(Camera.CFrame.Position) * CFrame.fromOrientation(-0.45, currentYaw, 0)
-            task.wait(0.05)
-            Camera.CameraType = Enum.CameraType.Custom
-            root.CFrame = root.CFrame * CFrame.Angles(0, math.pi, 0)
-            task.wait(0.12)
-            EquipFlash()
-        end
-    end
-end
-
-local function instantReset()
-    local char = getCharacter()
-    if isResetting or not char then return end
-    isResetting = true
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if hrp then
-        hrp.LocalTransparencyModifier = 1
-        hrp.CFrame = CFrame.new(0, 9.99999978e21, 9.99999978e21)
-    end
-    char:BreakJoints()
-    local hum = getHumanoid()
-    if hum then
-        hum.Health = 0
-    end
-    task.wait(0.5)
-    isResetting = false
-end
-
-local function rejoin()
-    TeleportService:Teleport(game.PlaceId, LocalPlayer)
-end
-
--- ======================== SETUP DA GUI ========================
-if PlayerGui:FindFirstChild("Nova Flash TP") then
-    PlayerGui["Nova Flash TP"]:Destroy()
-end
-
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "Nova Flash TP"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-ScreenGui.Parent = PlayerGui
-
--- ======================== TOP WATERMARK ========================
-local TopWatermark = Instance.new("Frame")
-TopWatermark.Name = "TopWatermark"
-TopWatermark.Size = UDim2.new(0, 160, 0, 52)
-TopWatermark.Position = UDim2.new(0.5, -80, 0, 4)
-TopWatermark.BackgroundColor3 = Color3.new(0, 0, 0)
-TopWatermark.BackgroundTransparency = 0.25
-TopWatermark.BorderSizePixel = 0
-TopWatermark.Parent = ScreenGui
-
-local WM_Corner = Instance.new("UICorner")
-WM_Corner.CornerRadius = UDim.new(0, 8)
-WM_Corner.Parent = TopWatermark
-
-local WM_Stroke = Instance.new("UIStroke")
-WM_Stroke.Thickness = 2
-WM_Stroke.Color = COLOR_BLUE
-WM_Stroke.Transparency = 0.15
-WM_Stroke.Parent = TopWatermark
-
-local WM_StrokeGrad = Instance.new("UIGradient")
-WM_StrokeGrad.Parent = WM_Stroke
-
-local strokeRotation = 0
-RunService.RenderStepped:Connect(function()
-    strokeRotation = (strokeRotation + 1) % 360
-    WM_StrokeGrad.Rotation = strokeRotation
+makeToggleButton(Content, 0, "Flash TP", false, function(on)
+	flashEnabled = on
+	if on then flashStart() else flashStop() end
 end)
 
-local WM_Title = Instance.new("TextLabel")
-WM_Title.Size = UDim2.new(1, 0, 0, 12)
-WM_Title.Position = UDim2.new(0, 0, 0, 2)
-WM_Title.BackgroundTransparency = 1
-WM_Title.Text = "NOVA HUB"
-WM_Title.TextColor3 = COLOR_BLUE
-WM_Title.Font = Enum.Font.GothamBold
-WM_Title.TextSize = 10
-WM_Title.TextStrokeColor3 = Color3.new(0, 0, 0)
-WM_Title.TextStrokeTransparency = 0.4
-WM_Title.TextXAlignment = Enum.TextXAlignment.Center
-WM_Title.Parent = TopWatermark
-
-local WM_PingFps = Instance.new("TextLabel")
-WM_PingFps.Size = UDim2.new(1, 0, 0, 14)
-WM_PingFps.Position = UDim2.new(0, 0, 0, 13)
-WM_PingFps.BackgroundTransparency = 1
-WM_PingFps.Text = "0 | 0"
-WM_PingFps.TextColor3 = COLOR_WHITE
-WM_PingFps.Font = Enum.Font.FredokaOne
-WM_PingFps.TextSize = 13
-WM_PingFps.TextStrokeTransparency = 0
-WM_PingFps.TextXAlignment = Enum.TextXAlignment.Center
-WM_PingFps.Parent = TopWatermark
-
-local WM_BarBg = Instance.new("Frame")
-WM_BarBg.Size = UDim2.new(0.85, 0, 0, 6)
-WM_BarBg.Position = UDim2.new(0.075, 0, 0, 28)
-WM_BarBg.BackgroundColor3 = COLOR_WATERMARK_BG
-WM_BarBg.BorderSizePixel = 0
-WM_BarBg.Parent = TopWatermark
-
-local WM_BarBg_Corner = Instance.new("UICorner")
-WM_BarBg_Corner.CornerRadius = UDim.new(1, 0)
-WM_BarBg_Corner.Parent = WM_BarBg
-
-local WM_BarStroke = Instance.new("UIStroke")
-WM_BarStroke.Thickness = 1
-WM_BarStroke.Transparency = 0.4
-WM_BarStroke.Parent = WM_BarBg
-
-local WM_BarInner = Instance.new("Frame")
-WM_BarInner.Size = UDim2.new(1, -2, 1, -2)
-WM_BarInner.Position = UDim2.new(0, 1, 0, 1)
-WM_BarInner.BackgroundColor3 = COLOR_BAR_BG_INNER
-WM_BarInner.BorderSizePixel = 0
-WM_BarInner.Parent = WM_BarBg
-
-local WM_BarInner_Corner = Instance.new("UICorner")
-WM_BarInner_Corner.CornerRadius = UDim.new(1, 0)
-WM_BarInner_Corner.Parent = WM_BarInner
-
-local WM_BarFill = Instance.new("Frame")
-WM_BarFill.Size = UDim2.new(0, 0, 1, 0)
-WM_BarFill.BackgroundColor3 = COLOR_BLUE
-WM_BarFill.BorderSizePixel = 0
-WM_BarFill.Parent = WM_BarInner
-
-local WM_BarFill_Corner = Instance.new("UICorner")
-WM_BarFill_Corner.CornerRadius = UDim.new(1, 0)
-WM_BarFill_Corner.Parent = WM_BarFill
-
-local WM_Discord = Instance.new("TextLabel")
-WM_Discord.Size = UDim2.new(1, 0, 0, 10)
-WM_Discord.Position = UDim2.new(0, 0, 0, 39)
-WM_Discord.BackgroundTransparency = 1
-WM_Discord.Text = "discord.gg/novahub"
-WM_Discord.TextColor3 = Color3.new(0.6, 0.7, 1)
-WM_Discord.Font = Enum.Font.Gotham
-WM_Discord.TextSize = 8
-WM_Discord.TextTransparency = 0.4
-WM_Discord.TextXAlignment = Enum.TextXAlignment.Center
-WM_Discord.Parent = TopWatermark
-
-local lastTick = tick()
-local fpsCount = 0
-local currentFPS = 60
-RunService.RenderStepped:Connect(function()
-    fpsCount = fpsCount + 1
-    if tick() - lastTick >= 0.5 then
-        currentFPS = math.floor(fpsCount / (tick() - lastTick))
-        fpsCount = 0
-        lastTick = tick()
-    end
-    local ok, ping = pcall(function()
-        return math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
-    end)
-    WM_PingFps.Text = (ok and tostring(ping) or "?") .. " | " .. tostring(currentFPS)
-    local ratio = math.clamp(currentFPS / 60, 0, 1)
-    TweenService:Create(WM_BarFill, TweenInfo.new(0.3), {Size = UDim2.new(ratio, 0, 1, 0)}):Play()
+makeToggleButton(Content, 40, "Giant Potion", false, function(on)
+	giantEnabled = on
 end)
 
--- ======================== MAIN FRAME ========================
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "Frame"
-MainFrame.Size = UDim2.new(0, 220, 0, 280)
-MainFrame.Position = UDim2.new(0.5, -110, 0.5, -140)
-MainFrame.BackgroundColor3 = COLOR_BG_MAIN
-MainFrame.BackgroundTransparency = 0.1
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.Parent = ScreenGui
-
-local MF_Gradient = Instance.new("UIGradient")
-MF_Gradient.Rotation = 45
-MF_Gradient.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0,   Color3.new(0.0392157, 0.137255, 0.333333)),
-    ColorSequenceKeypoint.new(1,   Color3.new(0.0196078, 0.0588235, 0.137255)),
-})
-MF_Gradient.Parent = MainFrame
-
-local MF_Corner = Instance.new("UICorner")
-MF_Corner.CornerRadius = UDim.new(0, 14)
-MF_Corner.Parent = MainFrame
-
-local MF_Stroke = Instance.new("UIStroke")
-MF_Stroke.Thickness = 4.5
-MF_Stroke.Transparency = 0.08
-MF_Stroke.Parent = MainFrame
-
-local MF_StrokeGrad = Instance.new("UIGradient")
-MF_StrokeGrad.Parent = MF_Stroke
-
-RunService.RenderStepped:Connect(function()
-    MF_StrokeGrad.Rotation = strokeRotation
+makeToggleButton(Content, 80, "Zero Gravity", false, function(on)
+	if on then enableZeroGrav() else disableZeroGrav() end
 end)
 
--- TitleBar
-local TitleBar = Instance.new("Frame")
-TitleBar.Size = UDim2.new(1, -14, 0, 34)
-TitleBar.Position = UDim2.new(0, 7, 0, 7)
-TitleBar.BackgroundColor3 = COLOR_BG_DARK
-TitleBar.BorderSizePixel = 0
-TitleBar.Parent = MainFrame
-
-local TB_Corner = Instance.new("UICorner")
-TB_Corner.CornerRadius = UDim.new(0, 9)
-TB_Corner.Parent = TitleBar
-
-local NIcon = Instance.new("Frame")
-NIcon.Size = UDim2.new(0, 18, 0, 18)
-NIcon.Position = UDim2.new(0, 7, 0.5, -9)
-NIcon.BackgroundColor3 = COLOR_BG_DARK
-NIcon.BorderSizePixel = 0
-NIcon.Parent = TitleBar
-
-local NIcon_Corner = Instance.new("UICorner")
-NIcon_Corner.CornerRadius = UDim.new(0, 4)
-NIcon_Corner.Parent = NIcon
-
-local NIcon_Stroke = Instance.new("UIStroke")
-NIcon_Stroke.Thickness = 1.5
-NIcon_Stroke.Color = Color3.new(0.27451, 0.627451, 0.862745)
-NIcon_Stroke.Transparency = 0.3
-NIcon_Stroke.Parent = NIcon
-
-local NIcon_Label = Instance.new("TextLabel")
-NIcon_Label.Size = UDim2.new(1, 0, 1, 0)
-NIcon_Label.BackgroundTransparency = 1
-NIcon_Label.Text = "N"
-NIcon_Label.TextColor3 = COLOR_WHITE
-NIcon_Label.Font = Enum.Font.GothamBlack
-NIcon_Label.TextSize = 11
-NIcon_Label.TextXAlignment = Enum.TextXAlignment.Center
-NIcon_Label.Parent = NIcon
-
-local TitleLabel = Instance.new("TextLabel")
-TitleLabel.Size = UDim2.new(1, -65, 1, 0)
-TitleLabel.Position = UDim2.new(0, 32, 0, 0)
-TitleLabel.BackgroundTransparency = 1
-TitleLabel.Text = "Nova Flash TP"
-TitleLabel.TextColor3 = COLOR_WHITE
-TitleLabel.Font = Enum.Font.GothamBold
-TitleLabel.TextSize = 12
-TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-TitleLabel.Parent = TitleBar
-
--- Botão de minimizar removido
-
--- ======================== SETTINGS FRAME ========================
-local SettingsFrame = Instance.new("Frame")
-SettingsFrame.Name = "SettingsFrame"
-SettingsFrame.Size = UDim2.new(0, 170, 0, 260)
-SettingsFrame.Position = UDim2.new(1, 15, 0, 0)
-SettingsFrame.BackgroundColor3 = COLOR_BG_MAIN
-SettingsFrame.BackgroundTransparency = 0.1
-SettingsFrame.BorderSizePixel = 0
-SettingsFrame.Visible = false
-SettingsFrame.Parent = MainFrame
-
-local SF_Gradient = MF_Gradient:Clone()
-SF_Gradient.Parent = SettingsFrame
-
-local SF_Corner = Instance.new("UICorner")
-SF_Corner.CornerRadius = UDim.new(0, 14)
-SF_Corner.Parent = SettingsFrame
-
-local SF_Stroke = MF_Stroke:Clone()
-SF_Stroke.Parent = SettingsFrame
-
-local SF_StrokeGrad = Instance.new("UIGradient")
-SF_StrokeGrad.Parent = SF_Stroke
-
-RunService.RenderStepped:Connect(function()
-    SF_StrokeGrad.Rotation = strokeRotation
+makeActionButton(Content, 120, "Align Camera", function()
+	alignCamera()
 end)
 
-local SF_TitleBar = Instance.new("Frame")
-SF_TitleBar.Size = UDim2.new(1, -14, 0, 32)
-SF_TitleBar.Position = UDim2.new(0, 7, 0, 7)
-SF_TitleBar.BackgroundColor3 = COLOR_BG_DARK
-SF_TitleBar.BorderSizePixel = 0
-SF_TitleBar.Parent = SettingsFrame
+local ProgressTrack = Instance.new("Frame")
+ProgressTrack.Name = "ProgressTrack"
+ProgressTrack.Size = UDim2.new(1, 0, 0, 10)
+ProgressTrack.Position = UDim2.new(0, 0, 0, 165)
+ProgressTrack.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+ProgressTrack.BorderSizePixel = 0
+ProgressTrack.Parent = Content
 
-local SF_TB_Corner = Instance.new("UICorner")
-SF_TB_Corner.CornerRadius = UDim.new(0, 9)
-SF_TB_Corner.Parent = SF_TitleBar
+local PTC = Instance.new("UICorner")
+PTC.CornerRadius = UDim.new(0, 5)
+PTC.Parent = ProgressTrack
 
-local SF_TitleLabel = Instance.new("TextLabel")
-SF_TitleLabel.Size = UDim2.new(1, -40, 1, 0)
-SF_TitleLabel.Position = UDim2.new(0, 8, 0, 0)
-SF_TitleLabel.BackgroundTransparency = 1
-SF_TitleLabel.Text = "Nova Settings"
-SF_TitleLabel.TextColor3 = COLOR_WHITE
-SF_TitleLabel.Font = Enum.Font.GothamBold
-SF_TitleLabel.TextSize = 12
-SF_TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-SF_TitleLabel.Parent = SF_TitleBar
+barFill = Instance.new("Frame")
+barFill.Name = "Fill"
+barFill.Size = UDim2.new(0, 0, 1, 0)
+barFill.BackgroundColor3 = GREEN
+barFill.BorderSizePixel = 0
+barFill.Parent = ProgressTrack
 
--- Expand Button
-local ExpandBtn = Instance.new("TextButton")
-ExpandBtn.Size = UDim2.new(0, 20, 0, 20)
-ExpandBtn.Position = UDim2.new(1, -26, 0.5, -10)
-ExpandBtn.BackgroundColor3 = COLOR_BTN_KEYBIND
-ExpandBtn.BorderSizePixel = 0
-ExpandBtn.Text = "+"
-ExpandBtn.TextColor3 = COLOR_WHITE
-ExpandBtn.Font = Enum.Font.GothamBold
-ExpandBtn.TextSize = 14
-ExpandBtn.AutoButtonColor = false
-ExpandBtn.Parent = TitleBar
+Instance.new("UICorner", barFill).CornerRadius = UDim.new(1, 0)
 
-local ExpandBtn_Corner = Instance.new("UICorner")
-ExpandBtn_Corner.CornerRadius = UDim.new(0, 4)
-ExpandBtn_Corner.Parent = ExpandBtn
+local SliderRow = Instance.new("Frame")
+SliderRow.Name = "SliderRow"
+SliderRow.Size = UDim2.new(1, 0, 0, 42)
+SliderRow.Position = UDim2.new(0, 0, 0, 182)
+SliderRow.BackgroundTransparency = 1
+SliderRow.Parent = Content
 
--- ======================== FUNÇÕES DE CRIAÇÃO DE UI ========================
-local function createToggle(parent, labelText, yPos, stateKey, extraAction)
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(0, 108, 0, 15)
-    lbl.Position = UDim2.new(0.08, 0, 0, yPos)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = labelText
-    lbl.TextColor3 = COLOR_TEXT
-    lbl.Font = Enum.Font.Gotham
-    lbl.TextSize = 9
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Parent = parent
+local TriggerLabel = Instance.new("TextLabel")
+TriggerLabel.Name = "TriggerLabel"
+TriggerLabel.Size = UDim2.new(1, 0, 0, 15)
+TriggerLabel.BackgroundTransparency = 1
+TriggerLabel.Text = "TRIGGER: 91%"
+TriggerLabel.TextColor3 = Color3.fromRGB(160, 160, 160)
+TriggerLabel.TextSize = 10
+TriggerLabel.Font = Enum.Font.GothamBold
+TriggerLabel.FontFace = Font.new(
+	"rbxasset://fonts/families/GothamSSm.json",
+	Enum.FontWeight.Bold,
+	Enum.FontStyle.Normal
+)
+TriggerLabel.TextXAlignment = Enum.TextXAlignment.Left
+TriggerLabel.Parent = SliderRow
 
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0, 28, 0, 13)
-    btn.Position = UDim2.new(0.92, -30, 0, yPos + 1)
-    btn.BackgroundColor3 = toggleStates[stateKey] and COLOR_BLUE or Color3.new(0.15, 0.17, 0.25)
-    btn.BorderSizePixel = 0
-    btn.Text = ""
-    btn.AutoButtonColor = false
-    btn.Parent = parent
+local SliderTrack = Instance.new("Frame")
+SliderTrack.Name = "SliderTrack"
+SliderTrack.Size = UDim2.new(1, 0, 0, 4)
+SliderTrack.Position = UDim2.new(0, 0, 0, 22)
+SliderTrack.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+SliderTrack.BorderSizePixel = 0
+SliderTrack.Parent = SliderRow
 
-    local btn_Corner = Instance.new("UICorner")
-    btn_Corner.CornerRadius = UDim.new(1, 0)
-    btn_Corner.Parent = btn
+Instance.new("UICorner", SliderTrack).CornerRadius = UDim.new(1, 0)
 
-    local btn_Stroke = Instance.new("UIStroke")
-    btn_Stroke.Thickness = 1.2
-    btn_Stroke.Transparency = 0.5
-    btn_Stroke.Parent = btn
+local initPct = 0.91
+local SliderFill = Instance.new("Frame")
+SliderFill.Name = "SliderFill"
+SliderFill.Size = UDim2.new(initPct, 0, 1, 0)
+SliderFill.BackgroundColor3 = GREEN
+SliderFill.BorderSizePixel = 0
+SliderFill.Parent = SliderTrack
 
-    local knob = Instance.new("Frame")
-    knob.Size = UDim2.new(0, 9, 0, 9)
-    knob.Position = toggleStates[stateKey] and UDim2.new(1, -11, 0.5, -4) or UDim2.new(0, 2, 0.5, -4)
-    knob.BackgroundColor3 = COLOR_TOGGLE_KNOB
-    knob.BorderSizePixel = 0
-    knob.Parent = btn
+Instance.new("UICorner", SliderFill).CornerRadius = UDim.new(1, 0)
 
-    local knob_Corner = Instance.new("UICorner")
-    knob_Corner.CornerRadius = UDim.new(1, 0)
-    knob_Corner.Parent = knob
+local Knob = Instance.new("TextButton")
+Knob.Name = "Knob"
+Knob.Size = UDim2.new(0, 12, 0, 12)
+Knob.Position = UDim2.new(initPct, 0, 0.5, 0)
+Knob.AnchorPoint = Vector2.new(0.5, 0.5)
+Knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Knob.BorderSizePixel = 0
+Knob.Text = ""
+Knob.Parent = SliderTrack
 
-    local knob_Stroke = Instance.new("UIStroke")
-    knob_Stroke.Color = COLOR_WHITE
-    knob_Stroke.Thickness = 0.5
-    knob_Stroke.Parent = knob
+Instance.new("UICorner", Knob).CornerRadius = UDim.new(1, 0)
 
-    btn.MouseButton1Click:Connect(function()
-        toggleStates[stateKey] = not toggleStates[stateKey]
-        local on = toggleStates[stateKey]
-        TweenService:Create(btn, TweenInfo.new(0.15), {
-            BackgroundColor3 = on and COLOR_BLUE or Color3.new(0.15, 0.17, 0.25)
-        }):Play()
-        TweenService:Create(knob, TweenInfo.new(0.15), {
-            Position = on and UDim2.new(1, -11, 0.5, -4) or UDim2.new(0, 2, 0.5, -4)
-        }):Play()
-        saveSettings()
-        
-        if stateKey == "SpeedBoost" then
-            if on then enableSpeedBoost() else disableSpeedBoost() end
-        elseif stateKey == "FOV" then
-            if on then enableFovChanger() else disableFovChanger() end
-        elseif stateKey == "Transparency" then
-            setDecorationEnabled(on)
-        end
-        if extraAction then extraAction(on) end
-    end)
+do
+	local dragging = false
+	local dragStart, startPos
 
-    return btn
+	Header.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			dragging = true
+			dragStart = input.Position
+			startPos = Main.Position
+			input.Changed:Connect(function()
+				if input.UserInputState == Enum.UserInputState.End then
+					dragging = false
+				end
+			end)
+		end
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			local delta = input.Position - dragStart
+			Main.Position = UDim2.new(
+				startPos.X.Scale, startPos.X.Offset + delta.X,
+				startPos.Y.Scale, startPos.Y.Offset + delta.Y
+			)
+		end
+	end)
 end
 
-local function createSlider(parent, labelText, yPos, stateKey, minVal, maxVal, isPercent, extraAction)
-    local container = Instance.new("Frame")
-    container.Size = UDim2.new(0.85, 0, 0, 28)
-    container.Position = UDim2.new(0.075, 0, 0, yPos)
-    container.BackgroundTransparency = 1
-    container.Parent = parent
+do
+	local expanded = true
+	local FULL_SIZE      = UDim2.new(0, 230, 0, 300)
+	local COLLAPSED_SIZE = UDim2.new(0, 230, 0, 36)
+	local ANIM = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 
-    local lbl = Instance.new("TextLabel")
-    lbl.Size = UDim2.new(1, 0, 0, 9)
-    lbl.Position = UDim2.new(0, 0, 0, 0)
-    lbl.BackgroundTransparency = 1
-    lbl.Text = labelText
-    lbl.TextColor3 = COLOR_TEXT_DIM
-    lbl.Font = Enum.Font.GothamBold
-    lbl.TextSize = 7
-    lbl.TextXAlignment = Enum.TextXAlignment.Left
-    lbl.Parent = container
-
-    local valLbl = Instance.new("TextLabel")
-    valLbl.Size = UDim2.new(1, 0, 0, 9)
-    valLbl.Position = UDim2.new(0, 0, 0, 9)
-    valLbl.BackgroundTransparency = 1
-    valLbl.TextColor3 = COLOR_TEXT
-    valLbl.Font = Enum.Font.Gotham
-    valLbl.TextSize = 7
-    valLbl.TextXAlignment = Enum.TextXAlignment.Right
-    valLbl.Parent = container
-
-    local function fmtVal(v)
-        if isPercent then
-            return string.format("%.1f%%", v)
-        else
-            return tostring(math.floor(v))
-        end
-    end
-    valLbl.Text = fmtVal(sliderValues[stateKey])
-
-    local track = Instance.new("Frame")
-    track.Size = UDim2.new(1, 0, 0, 4)
-    track.Position = UDim2.new(0, 0, 0, 20)
-    track.BackgroundColor3 = COLOR_SLIDER_BG
-    track.BorderSizePixel = 0
-    track.Parent = container
-
-    local track_Corner = Instance.new("UICorner")
-    track_Corner.CornerRadius = UDim.new(1, 0)
-    track_Corner.Parent = track
-
-    local fill = Instance.new("Frame")
-    local initPct = (sliderValues[stateKey] - minVal) / (maxVal - minVal)
-    fill.Size = UDim2.new(initPct, 0, 1, 0)
-    fill.BackgroundColor3 = COLOR_BLUE
-    fill.BorderSizePixel = 0
-    fill.Parent = track
-
-    local fill_Corner = Instance.new("UICorner")
-    fill_Corner.CornerRadius = UDim.new(1, 0)
-    fill_Corner.Parent = fill
-
-    local thumb = Instance.new("Frame")
-    thumb.Size = UDim2.new(0, 8, 0, 8)
-    thumb.Position = UDim2.new(initPct, -4, 0.5, -4)
-    thumb.BackgroundColor3 = COLOR_WHITE
-    thumb.BorderSizePixel = 0
-    thumb.Parent = track
-
-    local thumb_Corner = Instance.new("UICorner")
-    thumb_Corner.CornerRadius = UDim.new(1, 0)
-    thumb_Corner.Parent = thumb
-
-    local dragging = false
-
-    -- Função para atualizar o slider
-    local function updateSlider(val)
-        val = math.clamp(val, minVal, maxVal)
-        sliderValues[stateKey] = val
-        local pct = (val - minVal) / (maxVal - minVal)
-        fill.Size = UDim2.new(pct, 0, 1, 0)
-        thumb.Position = UDim2.new(pct, -4, 0.5, -4)
-        valLbl.Text = fmtVal(val)
-        saveSettings()
-        
-        if stateKey == "SpeedConfig" and toggleStates.SpeedBoost then
-            enableSpeedBoost()
-        elseif stateKey == "TransparencyAmount" and toggleStates.Transparency then
-            setDecorationEnabled(false)
-            task.wait(0.1)
-            setDecorationEnabled(true)
-        end
-        if extraAction then extraAction(val) end
-    end
-
-    -- Drag do slider
-    thumb.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or
-           input.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-        end
-    end)
-
-    -- Input manual (clicar no número)
-    valLbl.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            local box = Instance.new("TextBox")
-            box.Size = UDim2.new(0.5, 0, 1, 0)
-            box.Position = UDim2.new(0.5, 0, 0, 0)
-            box.BackgroundTransparency = 1
-            box.TextColor3 = COLOR_BLUE
-            box.Font = Enum.Font.Gotham
-            box.TextSize = 7
-            box.TextXAlignment = Enum.TextXAlignment.Right
-            box.Text = tostring(sliderValues[stateKey])
-            box.Parent = container
-            
-            box:CaptureFocus()
-            
-            box.FocusLost:Connect(function(enterPressed)
-                if enterPressed then
-                    local val = tonumber(box.Text)
-                    if val then
-                        updateSlider(val)
-                    end
-                end
-                box:Destroy()
-            end)
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if not dragging then return end
-        if input.UserInputType == Enum.UserInputType.MouseMovement or
-           input.UserInputType == Enum.UserInputType.Touch then
-            local trackPos = track.AbsolutePosition.X
-            local trackSize = track.AbsoluteSize.X
-            local mouseX = input.Position.X
-            local pct = math.clamp((mouseX - trackPos) / trackSize, 0, 1)
-            local val = minVal + pct * (maxVal - minVal)
-            updateSlider(val)
-        end
-    end)
-
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or
-           input.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
-    end)
-
-    return container
+	MinBtn.MouseButton1Click:Connect(function()
+		expanded = not expanded
+		MinBtn.Text = expanded and "-" or "+"
+		TweenService:Create(Main, ANIM, {
+			Size = expanded and FULL_SIZE or COLLAPSED_SIZE
+		}):Play()
+	end)
 end
 
--- ======================== MAIN FRAME CONTEÚDO ========================
-createToggle(MainFrame, "Auto Potion", 46, "AutoPotion")
-createToggle(MainFrame, "Speed Boost", 63, "SpeedBoost")
-createToggle(MainFrame, "Lagger on Steal", 80, "LaggerOnSteal")
+do
+	local sliderDragging = false
+	local SLIDER_MIN = 0.85
+	local SLIDER_MAX = 0.99
 
-local AlignUpBtn = Instance.new("TextButton")
-AlignUpBtn.Size = UDim2.new(0.58, 0, 0, 19)
-AlignUpBtn.Position = UDim2.new(0.075, 0, 0, 100)
-AlignUpBtn.BackgroundColor3 = COLOR_BLUE
-AlignUpBtn.BorderSizePixel = 0
-AlignUpBtn.Text = "ALIGN UP"
-AlignUpBtn.TextColor3 = COLOR_WHITE
-AlignUpBtn.Font = Enum.Font.GothamBold
-AlignUpBtn.TextSize = 9
-AlignUpBtn.AutoButtonColor = false
-AlignUpBtn.Parent = MainFrame
+	local function updateSlider(inputPos)
+		local trackAbsPos  = SliderTrack.AbsolutePosition.X
+		local trackAbsSize = SliderTrack.AbsoluteSize.X
+		local raw = math.clamp((inputPos.X - trackAbsPos) / trackAbsSize, 0, 1)
 
-local AU_Corner = Instance.new("UICorner")
-AU_Corner.CornerRadius = UDim.new(0, 5)
-AU_Corner.Parent = AlignUpBtn
+		local value = SLIDER_MIN + (SLIDER_MAX - SLIDER_MIN) * raw
+		value = math.floor(value * 100 + 0.5) / 100
 
-AlignUpBtn.MouseButton1Click:Connect(ExecuteAlign)
+		sliderValue    = value
+		manualOverride = true
 
-local KeyUpBtn = Instance.new("TextButton")
-KeyUpBtn.Size = UDim2.new(0.25, 0, 0, 19)
-KeyUpBtn.Position = UDim2.new(0.67, 0, 0, 100)
-KeyUpBtn.BackgroundColor3 = COLOR_BTN_KEYBIND
-KeyUpBtn.BorderSizePixel = 0
-KeyUpBtn.Text = "[" .. keybinds.AlignUp.Name .. "]"
-KeyUpBtn.TextColor3 = COLOR_TEXT
-KeyUpBtn.Font = Enum.Font.Gotham
-KeyUpBtn.TextSize = 8
-KeyUpBtn.AutoButtonColor = false
-KeyUpBtn.Parent = MainFrame
+		local pct = math.floor(value * 100 + 0.5)
+		SliderFill.Size   = UDim2.new(raw, 0, 1, 0)
+		Knob.Position     = UDim2.new(raw, 0, 0.5, 0)
+		TriggerLabel.Text = "TRIGGER: " .. pct .. "%"
+	end
 
-local KU_Corner = Instance.new("UICorner")
-KU_Corner.CornerRadius = UDim.new(0, 5)
-KU_Corner.Parent = KeyUpBtn
+	Knob.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			sliderDragging = true
+		end
+	end)
 
-local AlignDownBtn = Instance.new("TextButton")
-AlignDownBtn.Size = UDim2.new(0.58, 0, 0, 19)
-AlignDownBtn.Position = UDim2.new(0.075, 0, 0, 122)
-AlignDownBtn.BackgroundColor3 = COLOR_BLUE
-AlignDownBtn.BorderSizePixel = 0
-AlignDownBtn.Text = "ALIGN DOWN"
-AlignDownBtn.TextColor3 = COLOR_WHITE
-AlignDownBtn.Font = Enum.Font.GothamBold
-AlignDownBtn.TextSize = 9
-AlignDownBtn.AutoButtonColor = false
-AlignDownBtn.Parent = MainFrame
+	Knob.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			sliderDragging = false
+		end
+	end)
 
-local AD_Corner = Instance.new("UICorner")
-AD_Corner.CornerRadius = UDim.new(0, 5)
-AD_Corner.Parent = AlignDownBtn
+	UserInputService.InputChanged:Connect(function(input)
+		if sliderDragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
+			updateSlider(input.Position)
+		end
+	end)
 
-AlignDownBtn.MouseButton1Click:Connect(ExecuteAlignDown)
+	SliderTrack.InputBegan:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			updateSlider(input.Position)
+			sliderDragging = true
+		end
+	end)
 
-local KeyDownBtn = Instance.new("TextButton")
-KeyDownBtn.Size = UDim2.new(0.25, 0, 0, 19)
-KeyDownBtn.Position = UDim2.new(0.67, 0, 0, 122)
-KeyDownBtn.BackgroundColor3 = COLOR_BTN_KEYBIND
-KeyDownBtn.BorderSizePixel = 0
-KeyDownBtn.Text = "[" .. keybinds.AlignDown.Name .. "]"
-KeyDownBtn.TextColor3 = COLOR_TEXT
-KeyDownBtn.Font = Enum.Font.Gotham
-KeyDownBtn.TextSize = 8
-KeyDownBtn.AutoButtonColor = false
-KeyDownBtn.Parent = MainFrame
-
-local KD_Corner = Instance.new("UICorner")
-KD_Corner.CornerRadius = UDim.new(0, 5)
-KD_Corner.Parent = KeyDownBtn
-
-createSlider(MainFrame, "FLASH START %", 145, "FlashStart", 0, 100, true)
-createSlider(MainFrame, "LAGGER POWER", 175, "LaggerPower", 0, 100, false)
-
-local MF_Discord = Instance.new("TextLabel")
-MF_Discord.Size = UDim2.new(1, 0, 0, 11)
-MF_Discord.Position = UDim2.new(0, 0, 1, -13)
-MF_Discord.BackgroundTransparency = 1
-MF_Discord.Text = "discord.gg/novahub"
-MF_Discord.TextColor3 = Color3.new(0.6, 0.7, 1)
-MF_Discord.Font = Enum.Font.Gotham
-MF_Discord.TextSize = 8
-MF_Discord.TextTransparency = 0.5
-MF_Discord.TextXAlignment = Enum.TextXAlignment.Center
-MF_Discord.Parent = MainFrame
-
--- ======================== SETTINGS FRAME CONTEÚDO ========================
-createSlider(SettingsFrame, "SPEED CONFIG", 44, "SpeedConfig", 16, 60, false)
-createToggle(SettingsFrame, "FOV", 74, "FOV")
-createSlider(SettingsFrame, "FOV CONFIG", 91, "FovConfig", 30, 120, false)
-createToggle(SettingsFrame, "Transparency", 118, "Transparency")
-createSlider(SettingsFrame, "TRANSPARENCY AMOUNT", 134, "TransparencyAmount", 0, 1, true)
-
-local function makeUtilityButton(text, yPos, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.86, 0, 0, 20)
-    btn.Position = UDim2.new(0.07, 0, 0, yPos)
-    btn.BackgroundColor3 = COLOR_BLUE
-    btn.BorderSizePixel = 0
-    btn.Text = text
-    btn.TextColor3 = COLOR_WHITE
-    btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 9
-    btn.AutoButtonColor = false
-    btn.Parent = SettingsFrame
-    
-    local btn_Corner = Instance.new("UICorner")
-    btn_Corner.CornerRadius = UDim.new(0, 5)
-    btn_Corner.Parent = btn
-    
-    btn.MouseButton1Click:Connect(callback)
-    return btn
+	SliderTrack.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1
+			or input.UserInputType == Enum.UserInputType.Touch then
+			sliderDragging = false
+		end
+	end)
 end
-
-makeUtilityButton("INSTANT RESET", 170, instantReset)
-makeUtilityButton("REJOIN SERVER", 196, rejoin)
-makeUtilityButton("KICK USER", 222, function() game:Shutdown() end)
-
--- ======================== KEYBIND BINDING ========================
-local listeningFor = nil
-
-local function startListening(keyName, btn)
-    listeningFor = keyName
-    btn.Text = "[...]"
-    btn.TextColor3 = COLOR_BLUE
-end
-
-KeyUpBtn.MouseButton1Click:Connect(function()
-    startListening("AlignUp", KeyUpBtn)
-end)
-
-KeyDownBtn.MouseButton1Click:Connect(function()
-    startListening("AlignDown", KeyDownBtn)
-end)
-
-UserInputService.InputBegan:Connect(function(input, gpe)
-    if listeningFor and not gpe then
-        if input.UserInputType == Enum.UserInputType.Keyboard then
-            keybinds[listeningFor] = input.KeyCode
-            local label = "[" .. input.KeyCode.Name .. "]"
-            if listeningFor == "AlignUp" then
-                KeyUpBtn.Text = label
-                KeyUpBtn.TextColor3 = COLOR_TEXT
-            else
-                KeyDownBtn.Text = label
-                KeyDownBtn.TextColor3 = COLOR_TEXT
-            end
-            listeningFor = nil
-            saveSettings()
-        end
-    end
-end)
-
--- ======================== EXPAND ========================
-local settingsOpen = false
-ExpandBtn.MouseButton1Click:Connect(function()
-    settingsOpen = not settingsOpen
-    SettingsFrame.Visible = settingsOpen
-    ExpandBtn.Text = settingsOpen and "-" or "+"
-end)
-
--- ======================== PROXIMITY PROMPT (Auto Potion / Lagger) ========================
-ProximityPromptService.PromptButtonHoldBegan:Connect(function(prompt)
-    if activeTriggers[prompt] then return end
-    activeTriggers[prompt] = true
-
-    local start = os.clock()
-    local fired = false
-    local conn
-
-    conn = RunService.PreRender:Connect(function()
-        if not prompt or not prompt.Parent then
-            conn:Disconnect()
-            activeTriggers[prompt] = nil
-            return
-        end
-
-        local progress = math.clamp((os.clock() - start) / prompt.HoldDuration, 0, 1)
-        local flashThreshold = sliderValues.FlashStart / 100
-
-        if not fired and progress >= flashThreshold then
-            fired = true
-            conn:Disconnect()
-            activeTriggers[prompt] = nil
-
-            local char = LocalPlayer.Character
-            local tool = char and char:FindFirstChildOfClass("Tool")
-            if tool then
-                if toggleStates.LaggerOnSteal then triggerLagger() end
-                tool:Activate()
-                if toggleStates.AutoPotion then
-                    task.spawn(function()
-                        task.wait(0.09)
-                        local potion = LocalPlayer.Backpack:FindFirstChild("Giant Potion") or (char and char:FindFirstChild("Giant Potion"))
-                        if potion then
-                            local hum = char:FindFirstChildOfClass("Humanoid")
-                            if hum then
-                                hum:EquipTool(potion)
-                                task.wait(0.05)
-                                potion:Activate()
-                            end
-                        end
-                    end)
-                end
-                if toggleStates.SpeedBoost then enableSpeedBoost() end
-            end
-        end
-    end)
-
-    prompt.PromptButtonHoldEnded:Connect(function()
-        if not fired then
-            conn:Disconnect()
-            activeTriggers[prompt] = nil
-        end
-    end)
-end)
-
--- ======================== KEYBINDS GLOBAIS ========================
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == keybinds.AlignUp then
-        ExecuteAlign()
-    elseif input.KeyCode == keybinds.AlignDown then
-        ExecuteAlignDown()
-    end
-end)
-
--- ======================== INICIALIZAÇÃO ========================
-loadSettings()
-
-if toggleStates.SpeedBoost then enableSpeedBoost() end
-if toggleStates.FOV then enableFovChanger() end
-if toggleStates.Transparency then setDecorationEnabled(true) end
-
-LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(0.3)
-    if toggleStates.SpeedBoost then enableSpeedBoost() end
-    if toggleStates.FOV then enableFovChanger() end
-end)
-
-print("Nova Hub carregado com sucesso!")
-print("Discord: discord.gg/novahub")
